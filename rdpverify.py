@@ -87,7 +87,7 @@ def main(argv):
         securesettings[attrname] = signscope_settings[signscopename] = (attrname, attrtype, signscopename)
 
     parser = argparse.ArgumentParser('rdpsign')
-    parser.add_argument("infile", metavar='infile.rdp', help="rdp file to be signed")
+    parser.add_argument("infile", metavar='infile.rdp', help="rdp file to be verified")
     parser.add_argument("--CAfile", metavar='CAfile', default="/etc/ssl/certs/ca-certificates.crt",
                         help="CAfile (default is /etc/ssl/certs/ca-certificates.crt)")
     parser.add_argument("--check-fp", metavar='fingerprint', default=None,
@@ -100,6 +100,10 @@ def main(argv):
                         help="encoding of input file (default is to detect unicode types)")
 
     args = parser.parse_args(argv[1:])
+
+    env = dict(os.environ)
+    env['LC_ALL'] = 'C'
+    env['LANG'] = 'C'
 
     settings = list()
     signlines = list()
@@ -141,6 +145,11 @@ def main(argv):
 
     fulladdress = None
     alternatefulladdress = None
+    certs = []
+    output_cert_text = []
+    output_trail = []
+    check_fp_valid = None
+    check_dns_valid = None
             
     def add_signscope(sigscopename):
         sigscopename = sigscopename.strip()
@@ -186,73 +195,77 @@ def main(argv):
 
     msgblob = msgtext.encode('UTF-16LE')
 
-    fatal_error = False
-
     byte1, byte2, msgsiglen = unpack('<III', msgsig[0:12])
     if byte1 != 0x00010001 or byte2 != 0x00000001:
-        output_errors.append((3, 'Bad signature in RDP file'))
-        fatal_error = True
+        error_exit('Bad signature in RDP file')
     elif len(msgsig) - 12 < msgsiglen:
-        output_errors.append((3, 'Signature length mismatch in RDP file'))
-        fatal_error = True
+        error_exit('Signature length mismatch in RDP file')
     elif len(msgsig) - 12 > msgsiglen:
         output_errors.append((1, 'Signature length mismatch in RDP file (trailing data)'))
         msgsig = msgsig[0:msgsiglen+13]
 
-    if not fatal_error:
-        opensslin = msgsig[12:]
+    opensslin = msgsig[12:]
 
-        with tempfile.NamedTemporaryFile() as tmpsigfile:
-            tmpsigfile.write(opensslin)
-            tmpsigfile.flush()
+    with tempfile.NamedTemporaryFile() as tmpsigfile:
+        tmpsigfile.write(opensslin)
+        tmpsigfile.flush()
 
-            params  = [ 'openssl', 'smime', '-verify', '-binary' ]
-            params += [ '-content', '/dev/stdin' ]
-            params += [ '-inform', 'DER', '-in', tmpsigfile.name ]
-            params += [ '-noattr', '-nosmimecap' ]
-            params += [ '-CAfile', args.CAfile ]
-            params += [ '-purpose', 'any' ]
-            params += [ '-out', '/dev/null' ]
-                
-            try:
-                proc = subprocess.Popen(
-                    params,
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE)
-
-                opensslout, opensslerr = proc.communicate(msgblob)
-            except OSError as e:
-                error_exit('Error calling openssl command: ' + e.strerror)
-        
-            retcode = proc.poll()
-
-            if retcode != 0:
-                emsg = 'openssl command failed (return code #{0:d})'.format(retcode)
-                if opensslerr is not None:
-                    emsg += ':\n'
-                    emsg += opensslerr.decode('utf-8')
-                error_exit(emsg)
+        params  = [ 'openssl', 'smime', '-verify', '-binary' ]
+        params += [ '-content', '/dev/stdin' ]
+        params += [ '-inform', 'DER', '-in', tmpsigfile.name ]
+        params += [ '-noattr', '-nosmimecap' ]
+        params += [ '-CAfile', args.CAfile ]
+        params += [ '-purpose', 'any' ]
+        params += [ '-out', '/dev/null' ]
             
-            params  = [ 'openssl', 'pkcs7', '-inform', 'DER', '-in', tmpsigfile.name ]
-            params += [ '-print_certs' ]
+        try:
+            proc = subprocess.Popen(
+                params,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env)
 
-            try:
-                proc = subprocess.Popen(
-                    params,
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE)
+            opensslout, opensslerr = proc.communicate(msgblob)
+        except OSError as e:
+            error_exit('Error calling openssl command: ' + e.strerror)
+    
+        retcode = proc.poll()
 
-                opensslout, opensslerr = proc.communicate('')
-            except OSError as e:
-                error_exit('Error calling openssl command: ' + e.strerror)
+        if retcode != 0:
+            emsg = 'openssl command failed (return code #{0:d})'.format(retcode)
+            if opensslerr is not None:
+                emsg += ':\n'
+                emsg += opensslerr.decode('utf-8')
+            error_exit(emsg)
+
+        output_errors.append((0, 'RDP signature is valid'))
         
-    #sys.stderr.buffer.write(opensslout)
-    sys.stderr.buffer.write(opensslerr)
+        params  = [ 'openssl', 'pkcs7', '-inform', 'DER', '-in', tmpsigfile.name ]
+        params += [ '-print_certs' ]
+
+        try:
+            proc = subprocess.Popen(
+                params,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env)
+
+            opensslout, opensslerr = proc.communicate('')
+        except OSError as e:
+            error_exit('Error calling openssl command: ' + e.strerror)
+        
+        retcode = proc.poll()
+
+        if retcode != 0:
+            emsg = 'openssl command failed (return code #{0:d})'.format(retcode)
+            if opensslerr is not None:
+                emsg += ':\n'
+                emsg += opensslerr.decode('utf-8')
+            error_exit(emsg)
 
     current_cert = None
-    certs = []
     for line in opensslout.split(b'\n'):
         if line == b'-----BEGIN CERTIFICATE-----':
             current_cert = len(certs)
@@ -274,19 +287,24 @@ def main(argv):
             params,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE)
+            stderr=subprocess.PIPE,
+            env=env)
 
         opensslout, opensslerr = proc.communicate(certs[0])
     except OSError as e:
         error_exit('Error calling openssl command: ' + e.strerror)
-    
+
+    retcode = proc.poll()
+
+    if retcode != 0:
+        emsg = 'openssl command failed (return code #{0:d})'.format(retcode)
+        if opensslerr is not None:
+            emsg += ':\n'
+            emsg += opensslerr.decode('utf-8')
+        error_exit(emsg)
+
     sys.stderr.buffer.write(opensslerr)
     
-    output_cert_text = []
-    output_trail = []
-    check_fp_valid = None
-    check_dns_valid = None
-
     parse_in_cert = False
     parse_in_trail = False
     for line in opensslout.decode(proc_term_encoding).split('\n'):

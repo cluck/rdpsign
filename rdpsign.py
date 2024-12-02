@@ -73,6 +73,13 @@ def main(argv):
 		[ 'kdcproxyname:s:', 'KDCProxyName' ],
 		[ 'eventloguploadaddress:s:', 'EventLogUploadAddress' ],
 	]
+    defaultsignscope = ['Full Address', 'Alternate Full Address', 'Use Redirection Server Name',
+                        'Server Port', 'GatewayHostname', 'GatewayUsageMethod', 'GatewayProfileUsageMethod',
+                        'GatewayCredentialsSource', 'PromptCredentialOnce', 'Alternate Shell',
+                        'RemoteApplicationProgram', 'RemoteApplicationMode', 'RemoteApplicationName',
+                        'RemoteApplicationCmdLine', 'RedirectDrives', 'RedirectPrinters', 'RedirectCOMPorts',
+                        'RedirectSmartCards', 'RedirectClipboard', 'DevicesToRedirect', 'DrivesToRedirect',
+                        'LoadBalanceInfo']
 
 	parser = argparse.ArgumentParser('rdpsign')
 	parser.add_argument("infile", metavar='infile.rdp', help="rdp file to be signed")
