@@ -34,7 +34,7 @@ def error_exit(emsg):
     sys.exit(3)
 
 
-def main(argv):
+def main(argv=None):
     securesettings = {}
     signscope_settings = {}
     for attrname, attrtype, signscopename in [
@@ -99,7 +99,7 @@ def main(argv):
     parser.add_argument("-e", dest='encoding', metavar='encoding', default="unicode",
                         help="encoding of input file (default is to detect unicode types)")
 
-    args = parser.parse_args(argv[1:])
+    args = parser.parse_args(argv)
 
     env = dict(os.environ)
     env['LC_ALL'] = 'C'
@@ -361,13 +361,13 @@ def main(argv):
     
     retval = 0
     max_errlevel = 0
-    errtype = {0: 'INFO', 1: 'WARNING', 2: 'ERROR', 3: 'UNKNONW'}
+    errtype = {0: 'INFO', 1: 'WARNING', 2: 'ERROR', 3: 'UNKNOWN'}
     for errlevel, errmsg in output_errors:
         max_errlevel = max(max_errlevel, errlevel)
     if max_errlevel == 0:
         text_output = f"RDP OK - {args.infile}"
     else:
-        text_output = f"RDP ERROR ({max_errlevel}) - {args.infile}"
+        text_output = f"RDP {errtype[max_errlevel]} - {args.infile}"
 
     print(text_output)
 
@@ -382,5 +382,5 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    main(sys.argv)
+    sys.exit(main())
 
