@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 # Remote Desktop Protocol (.rdp) file signing
 # Copyright (C) 2024 Claudio Luck
@@ -28,74 +28,82 @@ import tempfile
 from struct import pack, unpack
 from base64 import b64encode, b64decode
 
+attrprops_by_rdp = {}
+attrprops_by_signscope = {}
+
+for attrname, attrtype, signscopename in (
+    # rdp-file-property, rdp-file-type (s,i), propname in signscope
+    ( 'full address', 's', 'Full Address' ),
+    ( 'alternate full address', 's', 'Alternate Full Address' ),
+    ( 'pcb', 's', 'PCB' ),
+    ( 'use redirection server name', 'i', 'Use Redirection Server Name' ),
+    ( 'server port', 'i', 'Server Port' ),
+    ( 'negotiate security layer', 'i', 'Negotiate Security Layer' ),
+    ( 'enablecredsspsupport', 'i', 'EnableCredSspSupport' ),
+    ( 'disableconnectionsharing', 'i', 'DisableConnectionSharing' ),
+    ( 'autoreconnection enabled', 'i', 'AutoReconnection Enabled' ),
+    ( 'gatewayhostname', 's', 'GatewayHostname' ),
+    ( 'gatewayusagemethod', 'i', 'GatewayUsageMethod' ),
+    ( 'gatewayprofileusagemethod', 'i', 'GatewayProfileUsageMethod' ),
+    ( 'gatewaycredentialssource', 'i', 'GatewayCredentialsSource' ),
+    ( 'support url', 's', 'Support URL' ),
+    ( 'promptcredentialonce', 'i', 'PromptCredentialOnce' ),
+    ( 'require pre-authentication', 'i', 'Require pre-authentication' ),
+    ( 'pre-authentication server address', 's', 'Pre-authentication server address' ),
+    ( 'alternate shell', 's', 'Alternate Shell' ),
+    ( 'shell working directory', 's', 'Shell Working Directory' ),
+    ( 'remoteapplicationprogram', 's', 'RemoteApplicationProgram' ),
+    ( 'remoteapplicationexpandworkingdir', 's', 'RemoteApplicationExpandWorkingdir' ),
+    ( 'remoteapplicationmode', 'i', 'RemoteApplicationMode' ),
+    ( 'remoteapplicationguid', 's', 'RemoteApplicationGuid' ),
+    ( 'remoteapplicationname', 's', 'RemoteApplicationName' ),
+    ( 'remoteapplicationicon', 's', 'RemoteApplicationIcon' ),
+    ( 'remoteapplicationfile', 's', 'RemoteApplicationFile' ),
+    ( 'remoteapplicationfileextensions', 's', 'RemoteApplicationFileExtensions' ),
+    ( 'remoteapplicationcmdline', 's', 'RemoteApplicationCmdLine' ),
+    ( 'remoteapplicationexpandcmdline', 's', 'RemoteApplicationExpandCmdLine' ),
+    ( 'prompt for credentials', 'i', 'Prompt For Credentials' ),
+    ( 'authentication level', 'i', 'Authentication Level' ),
+    ( 'audiomode', 'i', 'AudioMode' ),
+    ( 'redirectdrives', 'i', 'RedirectDrives' ),
+    ( 'redirectprinters', 'i', 'RedirectPrinters' ),
+    ( 'redirectcomports', 'i', 'RedirectCOMPorts' ),
+    ( 'redirectsmartcards', 'i', 'RedirectSmartCards' ),
+    ( 'redirectposdevices', 'i', 'RedirectPOSDevices' ),
+    ( 'redirectclipboard', 'i', 'RedirectClipboard' ),
+    ( 'devicestoredirect', 's', 'DevicesToRedirect' ),
+    ( 'drivestoredirect', 's', 'DrivesToRedirect' ),
+    ( 'loadbalanceinfo', 's', 'LoadBalanceInfo' ),
+    ( 'redirectdirectx', 'i', 'RedirectDirectX' ),
+    ( 'rdgiskdcproxy', 'i', 'RDGIsKDCProxy' ),
+    ( 'kdcproxyname', 's', 'KDCProxyName' ),
+    ( 'eventloguploadaddress', 's', 'EventLogUploadAddress' ),
+):
+    attrprops_by_rdp[attrname] = attrprops_by_signscope[signscopename] = attrname, attrtype, signscopename
 
 def error_exit(emsg):
     print("RDP FAIL - " + emsg)
     sys.exit(3)
 
+def error_warn(emsg):
+    print("RDP FAIL - " + emsg)
+
 
 def main(argv=None):
-    securesettings = {}
-    signscope_settings = {}
-    for attrname, attrtype, signscopename in [
-        [ 'full address', 's', 'Full Address' ],
-        [ 'alternate full address', 's', 'Alternate Full Address' ],
-        [ 'pcb', 's', 'PCB' ],
-        [ 'use redirection server name', 'i', 'Use Redirection Server Name' ],
-        [ 'server port', 'i', 'Server Port' ],
-        [ 'negotiate security layer', 'i', 'Negotiate Security Layer' ],
-        [ 'enablecredsspsupport', 'i', 'EnableCredSspSupport' ],
-        [ 'disableconnectionsharing', 'i', 'DisableConnectionSharing' ],
-        [ 'autoreconnection enabled', 'i', 'AutoReconnection Enabled' ],
-        [ 'gatewayhostname', 's', 'GatewayHostname' ],
-        [ 'gatewayusagemethod', 'i', 'GatewayUsageMethod' ],
-        [ 'gatewayprofileusagemethod', 'i', 'GatewayProfileUsageMethod' ],
-        [ 'gatewaycredentialssource', 'i', 'GatewayCredentialsSource' ],
-        [ 'support url', 's', 'Support URL' ],
-        [ 'promptcredentialonce', 'i', 'PromptCredentialOnce' ],
-        [ 'require pre-authentication', 'i', 'Require pre-authentication' ],
-        [ 'pre-authentication server address', 's', 'Pre-authentication server address' ],
-        [ 'alternate shell', 's', 'Alternate Shell' ],
-        [ 'shell working directory', 's', 'Shell Working Directory' ],
-        [ 'remoteapplicationprogram', 's', 'RemoteApplicationProgram' ],
-        [ 'remoteapplicationexpandworkingdir', 's', 'RemoteApplicationExpandWorkingdir' ],
-        [ 'remoteapplicationmode', 'i', 'RemoteApplicationMode' ],
-        [ 'remoteapplicationguid', 's', 'RemoteApplicationGuid' ],
-        [ 'remoteapplicationname', 's', 'RemoteApplicationName' ],
-        [ 'remoteapplicationicon', 's', 'RemoteApplicationIcon' ],
-        [ 'remoteapplicationfile', 's', 'RemoteApplicationFile' ],
-        [ 'remoteapplicationfileextensions', 's', 'RemoteApplicationFileExtensions' ],
-        [ 'remoteapplicationcmdline', 's', 'RemoteApplicationCmdLine' ],
-        [ 'remoteapplicationexpandcmdline', 's', 'RemoteApplicationExpandCmdLine' ],
-        [ 'prompt for credentials', 'i', 'Prompt For Credentials' ],
-        [ 'authentication level', 'i', 'Authentication Level' ],
-        [ 'audiomode', 'i', 'AudioMode' ],
-        [ 'redirectdrives', 'i', 'RedirectDrives' ],
-        [ 'redirectprinters', 'i', 'RedirectPrinters' ],
-        [ 'redirectcomports', 'i', 'RedirectCOMPorts' ],
-        [ 'redirectsmartcards', 'i', 'RedirectSmartCards' ],
-        [ 'redirectposdevices', 'i', 'RedirectPOSDevices' ],
-        [ 'redirectclipboard', 'i', 'RedirectClipboard' ],
-        [ 'devicestoredirect', 's', 'DevicesToRedirect' ],
-        [ 'drivestoredirect', 's', 'DrivesToRedirect' ],
-        [ 'loadbalanceinfo', 's', 'LoadBalanceInfo' ],
-        [ 'redirectdirectx', 'i', 'RedirectDirectX' ],
-        [ 'rdgiskdcproxy', 'i', 'RDGIsKDCProxy' ],
-        [ 'kdcproxyname', 's', 'KDCProxyName' ],
-        [ 'eventloguploadaddress', 's', 'EventLogUploadAddress' ],
-    ]:
-        securesettings[attrname] = signscope_settings[signscopename] = (attrname, attrtype, signscopename)
-
     parser = argparse.ArgumentParser('rdpsign')
     parser.add_argument("infile", metavar='infile.rdp', help="rdp file to be verified")
     parser.add_argument("--CAfile", metavar='CAfile', default="/etc/ssl/certs/ca-certificates.crt",
                         help="CAfile (default is /etc/ssl/certs/ca-certificates.crt)")
     parser.add_argument("--check-fp", metavar='fingerprint', default=None,
-                        help="Also check SHA256 Fingerprint of signing certificate (if signature is valid)")
+                        help="Also check SHA256 fingerprint of signing certificate (if signature is valid)")
     parser.add_argument("--check-dns", metavar='dns', action='append', default=[],
                         help="Also check for DNS name present (if signature is valid)")
     parser.add_argument("--showcert", action='store_true', default=False,
                         help="Show signing certificate (if signature is valid)")
+    parser.add_argument("--showfp", action='store_true', default=False,
+                        help="Show signing certificate SHA256 fingerprint (if signature is valid)")
+    parser.add_argument("--openssl-bin", dest='osslbin', default=('openssl' if sys.platform != 'win32' else 'openssl.exe'),
+                        help="Path to OpenSSL command line utility")
     parser.add_argument("-e", dest='encoding', metavar='encoding', default="unicode",
                         help="encoding of input file (default is to detect unicode types)")
 
@@ -105,11 +113,12 @@ def main(argv=None):
     env['LC_ALL'] = 'C'
     env['LANG'] = 'C'
 
-    settings = list()
+    settings = dict()
     signlines = list()
     signnames = list()
     signscope = set()
     msgsig = b'\x01\x00\x01\x00\x01\x00\x00\x00\x00\x00\x00\x00' # = pack('<III', 0x00010001, 0x00000001, 0x0)
+    sigvalid = None
     
     output_errors = []  # [ ({0=info,1=warn,2=critical,3=unknown}, message) ]
 
@@ -145,17 +154,21 @@ def main(argv=None):
 
     fulladdress = None
     alternatefulladdress = None
+    alternatefulladdress_line = None
     certs = []
+    certs_subject = dict()
     output_cert_text = []
     output_trail = []
     check_fp_valid = None
     check_dns_valid = None
             
-    def add_signscope(sigscopename):
+    def add_signscope(sigscopename, settings):
         sigscopename = sigscopename.strip()
-        secureargname, secureargtype, _ = signscope_settings.get(sigscopename, (None, None, None))
-        if secureargname is not None:
-            signscope.add((secureargname, secureargtype))
+        secureargname, secureargtype, _ = attrprops_by_signscope.get(sigscopename, (None, None, None))
+        if secureargname is None:
+            secureargname = sigscopename.lower()
+            secureargtype = settings.get(secureargname, '.s')[1]
+        signscope.add((secureargname, secureargtype))
 
     for line in lines:
         if not line:
@@ -168,28 +181,27 @@ def main(argv=None):
             fulladdress = argval
         elif (argname, argtype) == ('alternate full address', 's'):
             alternatefulladdress = argval
+            alternatefulladdress_line = line
         elif (argname, argtype) == ('signature', 's'):
             msgsig = b64decode(argval)
             continue
         elif (argname, argtype) == ('signscope', 's'):
-            [ add_signscope(scope) for scope in argval.split(',') ]
+            [ add_signscope(scope, settings) for scope in argval.split(',') ]
             continue
         elif argtype not in ('s', 'i', 'b'):
             raise Exception(f"RDP file format error: '{line}'")
-        settings.append((argname, argtype, argval, line))
+        settings[argname] = (argname, argtype, argval, line)
 
-    # prevent hacks via alternate full address
-
-    if fulladdress and not alternatefulladdress:
-        settings.append('alternate full address:s:' + fulladdress)
-
-    for secargname, secargtype, secsigscopename in securesettings.values():
+    for secargname, secargtype, secsigscopename in attrprops_by_rdp.values():
         if len(signscope) != 0 and (secargname, secargtype) not in signscope:
             continue
-        for argname, argtype, argval, line in settings:
+        for argname, argtype, argval, line in settings.values():
             if argname == secargname and argtype == secargtype:
                 signnames.append(secsigscopename)
                 signlines.append(line)
+
+    if fulladdress and not alternatefulladdress:
+        settings['alternate full address'] = ('alternate full address', 's', fulladdress, alternatefulladdress_line)
 
     msgtext = '\r\n'.join(signlines) + '\r\n' + 'signscope:s:' + ','.join(signnames) + '\r\n' + '\x00'
 
@@ -210,7 +222,7 @@ def main(argv=None):
         tmpsigfile.write(opensslin)
         tmpsigfile.flush()
 
-        params  = [ 'openssl', 'smime', '-verify', '-binary' ]
+        params  = [ args.osslbin, 'smime', '-verify', '-binary' ]
         params += [ '-content', '/dev/stdin' ]
         params += [ '-inform', 'DER', '-in', tmpsigfile.name ]
         params += [ '-noattr', '-nosmimecap' ]
@@ -237,11 +249,18 @@ def main(argv=None):
             if opensslerr is not None:
                 emsg += ':\n'
                 emsg += opensslerr.decode('utf-8')
-            error_exit(emsg)
+            # Error codes see include/openssl/x509_vfy.h.in,
+            #  basically anything above 1 is a validation error
+            if retcode == 1:
+                error_exit(emsg)
+            error_warn(emsg)
+            sigvalid = False
+            output_errors.append((2, 'RDP signature is NOT VALID'))
+        else:
+            sigvalid = True
+            output_errors.append((0, 'RDP signature is valid'))
 
-        output_errors.append((0, 'RDP signature is valid'))
-        
-        params  = [ 'openssl', 'pkcs7', '-inform', 'DER', '-in', tmpsigfile.name ]
+        params  = [ args.osslbin, 'pkcs7', '-inform', 'DER', '-in', tmpsigfile.name ]
         params += [ '-print_certs' ]
 
         try:
@@ -264,19 +283,44 @@ def main(argv=None):
                 emsg += ':\n'
                 emsg += opensslerr.decode('utf-8')
             error_exit(emsg)
+        else:
+            sys.stderr.write(opensslerr.decode('utf-8'))
 
     current_cert = None
+    current_issuer = None
+    current_subject = None
+    cert_by_subject = dict()
+    issued_certs = dict()
     for line in opensslout.split(b'\n'):
-        if line == b'-----BEGIN CERTIFICATE-----':
-            current_cert = len(certs)
-            certs.append(line + b'\n')
+        if line == b'':
+            current_cert = None
+            continue
+        current_cert = len(certs) if current_cert is None else current_cert
+        if line.startswith(b'issuer='):
+            current_issuer = line[7:]
+        elif line.startswith(b'subject='):
+            certs_subject[current_cert] = current_subject = line[8:]
+        elif line == b'-----BEGIN CERTIFICATE-----':
+            while len(certs) <= current_cert:
+                certs.append(b'')
+            certs[current_cert] = line + b'\n'
         elif line == b'-----END CERTIFICATE-----':
             certs[current_cert] += line + b'\n'
-            current_cert = None
+            if current_issuer:
+                issuer_cert_set = issued_certs.setdefault(current_issuer, set())
+                if current_subject:
+                    issuer_cert_set.add(current_subject)
+            current_issuer = current_subject = current_cert = None
         elif current_cert is not None:
             certs[current_cert] += line + b'\n'
 
-    params  = [ 'openssl', 'x509', '-inform', 'PEM', '-in', '/dev/stdin', '-noout' ]
+    leaf_cert = 1-len(certs)  # the output tends to be CA>SUBCA>LEAF>ROOT, i.e. [-2]
+    for cert in range(0, len(certs)):
+        cert_subject = certs_subject[cert]
+        if len(issued_certs.get(cert_subject, set())) == 0:
+            leaf_cert = cert
+
+    params  = [ args.osslbin, 'x509', '-inform', 'PEM', '-in', '/dev/stdin', '-noout' ]
     params += [ '-text', '-subject', '-ext', 'subjectAltName' ]
     params += [ '-sha256', '-fingerprint' ]
 
@@ -290,7 +334,9 @@ def main(argv=None):
             stderr=subprocess.PIPE,
             env=env)
 
-        opensslout, opensslerr = proc.communicate(certs[0])
+        if args.showcert:
+            print(certs[leaf_cert].decode('utf-8'))
+        opensslout, opensslerr = proc.communicate(certs[leaf_cert])
     except OSError as e:
         error_exit('Error calling openssl command: ' + e.strerror)
 
@@ -322,14 +368,15 @@ def main(argv=None):
         elif parse_in_cert:
             output_cert_text.append(line)
 
+    check_fp_valid = False
+    have_fp = None
     if args.check_fp:
-        #output_errors.append((0, 'Checking fingerprint'))
-        check_fp_valid = False
         shouldbe_fp = ''.join(args.check_fp.split(':')).lower()
-        for line in output_trail:
-            if line.startswith('sha256 Fingerprint='):
-                _, _, fp = line.partition('=')
-                have_fp = ''.join(fp.rstrip('\n').split(':')).lower()
+    for line in output_trail:
+        if line.startswith('sha256 Fingerprint='):
+            _, _, fp = line.partition('=')
+            have_fp = ''.join(fp.rstrip('\n').split(':')).lower()
+            if args.check_fp:
                 if have_fp == shouldbe_fp:
                     check_fp_valid = True
                 else:
@@ -378,9 +425,17 @@ def main(argv=None):
         for line in output_cert_text:
             sys.stdout.write(line)
 
+    if args.showfp and have_fp:
+        sys.stdout.write('Fingerprint=' + have_fp + '\n')
+
     return max_errlevel
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    ret = main()
+    if ret:
+        print('ERROR:', str(ret), file=sys.stderr)
+    else:
+        print('OK', file=sys.stderr)
+    sys.exit(ret)
 
